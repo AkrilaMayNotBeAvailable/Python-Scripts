@@ -1,3 +1,5 @@
+from math import log10, sqrt
+from skimage.metrics import structural_similarity as ssim
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -31,7 +33,6 @@ def MatrixDCT(N, block):
 		for y in range(N):
 			phiRow = np.pi * u * (2.0 * y + 1.0) / ( 2.0  * N ) # Fórmula
 			block[u][y] = alpha_u * np.cos(phiRow)
-			
 	return block
 #=========================================
 # Discrete Cossine Transform: Array[N][N] Array[N][N] -> Array[N][N] (frequency domain)
@@ -116,6 +117,23 @@ def BlocksToImage(rows, columns, blockArray, blockSize):
 	1,2,0,3 -> Original image
 	'''
 	return block
+
+#========================================
+# PSNR : Array Array -> Number
+# Given two arrays representing a original image on the first and a compressed image as second,
+# Returns a floating-point value based on PSNR formula
+# Example:
+''' Based on clock image with compression factors 1:10
+For factor 10: PSNR return value -> 33.312639...
+For factor 5: PSNR return value -> 36.170812...
+For factor 1: PSNR return value -> 43.555596...
+'''
+def PSNR(original, compressed):
+  mse = np.square(np.subtract(original, compressed)).mean()
+  if(mse == 0):  # No noise found, both images are equal.
+    return float('inf')
+  psnr = 20 * log10(255.0 / sqrt(mse))
+  return psnr
 #================================
 # Main():
 #================================
@@ -124,7 +142,11 @@ imagem = cv2.imread("clock.tiff", cv2.COLOR_BGR2GRAY)
 # Important stuff
 #==========================
 blockSize = 8 # This is used everywhere, change it for different block slices, DCT size etc.
-factor = 10 # This is used in Quantization function as control for image compress/quality
+#factor = 10 # This is used in Quantization function as control for image compress/quality
+
+MINFACTOR = 1
+MAXFACTOR = 10
+
 heightBlocks = imagem.shape[0] // blockSize # Finds how many blocks there's based on blockSize
 widthBlocks = imagem.shape[1] // blockSize # Same as above but with width
 
@@ -140,23 +162,43 @@ modifiedImage = np.array(modifiedImage) # Conversion to Array
 
 # Apply JPEG Algorithm to image:
 #===============================
-treatmentBlock = [] # Those lists bother me aswell, it would be more optimized to use only one list in this part
-# Would be best to use only modifiedImage from above actually.
-for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	treatmentBlock.append(DCT(modifiedImage[i], dctBlock))
+for factor in range(MINFACTOR, MAXFACTOR+1):
+  treatmentBlock = [] # Those lists bother me aswell, it would be more optimized to use only one list in this part
+  # Would be best to use only modifiedImage from above actually.
+  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
+	  treatmentBlock.append(DCT(modifiedImage[i], dctBlock))
 
-treatmentBlockTwo = []
-for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	treatmentBlockTwo.append(Quantization(blockSize, factor, treatmentBlock[i]))
-	
-compressedImage = []
-for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	compressedImage.append(IDCT(treatmentBlockTwo[i], dctBlock))
+  treatmentBlockTwo = []
+  notZeros = 0
+  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
+	  treatmentBlockTwo.append(Quantization(blockSize, factor, treatmentBlock[i]))
+	  valuesZero = np.isclose(treatmentBlockTwo[i], 0)
+	  notZeros += (blockSize * blockSize - np.sum(valuesZero)) 
+	  
+  compressedImage = []
+  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
+	  compressedImage.append(IDCT(treatmentBlockTwo[i], dctBlock))
 
-# Return image from blocks
+  # Return image from blocks
+  #==========================
+  compressedImage = np.array(compressedImage)
+  compressedImage = BlocksToImage(heightBlocks, widthBlocks, compressedImage, blockSize)
+
+  # PSNR Values and Etcetera
+  #==========================
+  PSNRValue = PSNR(imagem, compressedImage)
+  SSIMValue = ssim(imagem, compressedImage, data_range=imagem.max() - compressedImage.min())
+  
+  
+  bppValue = (notZeros / (imagem.shape[0] * imagem.shape[1])) * 8 
+  
+  print(f"For compression factor {factor}: \n\tPSNR Value: {PSNRValue}\n\tSSIM Value: {SSIMValue}")
+  print(f"\t BPP Value: {bppValue}")
+  
 #==========================
-compressedImage = np.array(compressedImage)
-compressedImage = BlocksToImage(heightBlocks, widthBlocks, compressedImage, blockSize)
+# Save Image()
+#==========================
+#cv2.imwrite("CompressedClock.jpg", compressedImage)
 
 #==========================
 # Plot()
@@ -164,6 +206,8 @@ compressedImage = BlocksToImage(heightBlocks, widthBlocks, compressedImage, bloc
 fig, axs = plt.subplots(1, 2)
 
 axs[0].imshow(imagem, cmap='gray', vmin=0, vmax=255)
+axs[0].set_title("Original")
 axs[1].imshow(compressedImage, cmap='gray', vmin=0, vmax=255)
+axs[1].set_title(f"Compressão Fator {factor}")
 
 plt.show()
