@@ -2,9 +2,16 @@ from math import log10, sqrt
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
 import cv2
+from PIL import Image
 import matplotlib.pyplot as plt
 from pdb import set_trace as pause
 
+'''
+TODO :
+	Fix Documentation for Quantization Function
+	Fix Documentation Examples for PSNR Function
+	Python file modulations?
+'''
 # For better analysis of Matrix data
 #np.set_printoptions(precision=2, suppress=True)
 
@@ -68,19 +75,10 @@ def IDCT(block, dctArray):
 # factor -> Interger value, refers to how much the coefficients will be reduced
 # Array -> Expected a bidimensional array with DCT function applied beforehand.
 # Examples:
-''' Expected array for quantization for N = 8 and factor = 10:
-[[  1.  11.  21.  31.  41.  51.  61.  71.]
- [ 11.  21.  31.  41.  51.  61.  71.  81.]
-	.... (goes in this sequence)
- [ 61.  71.  81.  91. 101. 111. 121. 131.]
- [ 71.  81.  91. 101. 111. 121. 131. 141.]]
- 
- Return expected based on DCT example:
-[[ 1066 0 0 0 0 0 0 0 ]
-	........
-	-71 0 0 0 0 0 0 0]]
+''' 
+...
 '''
-def Quantization(N, QF, bloco):
+def Quantization(QF, bloco, size):
 	# Hardcoded Quantization Table:
 	qtTable = np.array([
 		[16, 11, 10, 16, 24, 40, 51, 61],
@@ -92,6 +90,10 @@ def Quantization(N, QF, bloco):
 		[49, 64, 78, 87, 103, 121, 120, 101],
 		[72, 92, 95, 98, 112, 100, 103, 99]
 	])
+
+	qtTable = cv2.resize(qtTable.astype(float), dsize=(size, size), interpolation=cv2.INTER_CUBIC)
+	
+	#print(qtTable)
 	
 	# Based on Quality Factor value, applies a formula otherwise, another formula
 	if QF < 50:
@@ -154,74 +156,79 @@ imagem = cv2.imread("clock.tiff", cv2.COLOR_BGR2GRAY)
 
 # Important stuff
 #==========================
-blockSize = 8 # This is used everywhere, change it for different block slices, DCT size etc.
-#factor = 10 # This is used in Quantization function as control for image compress/quality
-
+# 4, 8, 16, 32
+blockTypes = [4, 8, 16, 32]
 MINFACTOR = 1
 MAXFACTOR = 90
 
-#compressFactors = (list(range(MINFACTOR, MAXFACTOR+1)))
-compressFactors = []
-ssimValues = []
-psnrValues = []
-bppValues = []
-
-heightBlocks = imagem.shape[0] // blockSize # Finds how many blocks there's based on blockSize
-widthBlocks = imagem.shape[1] // blockSize # Same as above but with width
-
-# Initializates DCT standard block: 
-#===================================
-dctBlock = np.zeros((blockSize, blockSize), dtype=float)
-dctBlock = np.array(MatrixDCT(blockSize, dctBlock))
-
-# Split image in blocks
+# Lists for Graph Plot
 #==========================
-modifiedImage = SplitImage(heightBlocks, widthBlocks, imagem, blockSize)
-modifiedImage = np.array(modifiedImage) # Conversion to Array
+ssimValues = [[] for _ in blockTypes]
+psnrValues = [[] for _ in blockTypes]
+bppValues = [[] for _ in blockTypes]
+compressFactors = [[] for _ in blockTypes]
 
-# Apply JPEG Algorithm to image:
-#===============================
-for factor in range(MINFACTOR, MAXFACTOR+1):
-  treatmentBlock = [] # Those lists bother me aswell, it would be more optimized to use only one list in this part
-  # Would be best to use only modifiedImage from above actually.
-  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	  treatmentBlock.append(DCT(modifiedImage[i], dctBlock))
+# idx will be a index value between 0 and len(blockTypes)
+# while blockSize will be a value inside blockTypes list
+#================================================
+for idx, blockSize in enumerate(blockTypes):
+	heightBlocks = imagem.shape[0] // blockSize # Finds how many blocks there's based on blockSize
+	widthBlocks = imagem.shape[1] // blockSize # Same as above but with width
 
-  treatmentBlockTwo = []
-  notZeros = 0
-  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	  treatmentBlockTwo.append(Quantization(blockSize, factor, treatmentBlock[i]))
-	  valuesZero = np.isclose(treatmentBlockTwo[i], 0)
-	  notZeros += (blockSize * blockSize - np.sum(valuesZero)) 
-	  
-  compressedImage = []
-  for i in range(heightBlocks*widthBlocks): # This "for" bothers me
-	  compressedImage.append(IDCT(treatmentBlockTwo[i], dctBlock))
+	# Initializates DCT standard block: 
+	#===================================
+	dctBlock = np.zeros((blockSize, blockSize), dtype=float)
+	dctBlock = np.array(MatrixDCT(blockSize, dctBlock))
 
-  # Return image from blocks
-  #==========================
-  compressedImage = np.array(compressedImage)
-  compressedImage = BlocksToImage(heightBlocks, widthBlocks, compressedImage, blockSize)
+	# Split image in blocks
+	#==========================
+	modifiedImage = SplitImage(heightBlocks, widthBlocks, imagem, blockSize)
+	modifiedImage = np.array(modifiedImage) # Conversion to Array
 
-  # PSNR Values and Etcetera
-  #==========================
-  PSNRValue = PSNR(imagem, compressedImage)
-  SSIMValue = ssim(imagem, compressedImage, data_range=imagem.max() - compressedImage.min())
-  bppValue = (notZeros / (imagem.shape[0] * imagem.shape[1])) * 8
-  
-  # Lista de Verificações:
-  if(factor % 10 == 0):
-  	ssimValues.append(SSIMValue)
-  	psnrValues.append(PSNRValue)
-  	bppValues.append(bppValue)
-  	compressFactors.append(factor)
-  	
-  
-   
-  
-  print(f"For compression factor {factor}: \n\tPSNR Value: {PSNRValue}\n\tSSIM Value: {SSIMValue}")
-  print(f"\t BPP Value: {bppValue}")
-  
+	# Apply JPEG Algorithm to image: Values between 1 and 90
+	#=========================================================
+	for factor in range(MINFACTOR, MAXFACTOR+1):
+		# Applies DCT
+		treatmentBlock = []
+		for i in range(heightBlocks*widthBlocks): 
+			treatmentBlock.append(DCT(modifiedImage[i], dctBlock))
+		
+		# Applies Quantization
+		treatmentBlockTwo = []
+		notZeros = 0
+		for i in range(heightBlocks*widthBlocks):
+			treatmentBlockTwo.append(Quantization(factor, treatmentBlock[i], blockSize))
+			valuesZero = np.isclose(treatmentBlockTwo[i], 0)
+			notZeros += (blockSize * blockSize - np.sum(valuesZero)) 
+		
+		# Applies Inverse DCT
+		compressedImage = []
+		for i in range(heightBlocks*widthBlocks):
+			compressedImage.append(IDCT(treatmentBlockTwo[i], dctBlock))
+
+		# Return image from blocks
+		#==========================
+		compressedImage = np.array(compressedImage)
+		compressedImage = BlocksToImage(heightBlocks, widthBlocks, compressedImage, blockSize)
+
+		# PSNR Values and Etcetera
+		#==========================
+		PSNRValue = PSNR(imagem, compressedImage)
+		SSIMValue = ssim(imagem, compressedImage, data_range=imagem.max() - compressedImage.min())
+		bppValue = (notZeros / (imagem.shape[0] * imagem.shape[1])) * 8
+		
+		# Lista de Verificações:
+		#==========================
+		if(factor % 10 == 0):
+			ssimValues[idx].append(SSIMValue)
+			psnrValues[idx].append(PSNRValue)
+			bppValues[idx].append(bppValue)
+			compressFactors[idx].append(factor)
+		
+
+		print(f"For blockSize: {blockSize} For compression factor {factor}: \n\tPSNR Value: {PSNRValue}\n\tSSIM Value: {SSIMValue}")
+		print(f"\t BPP Value: {bppValue}")
+
 #==========================
 # Save Image()
 #==========================
@@ -230,36 +237,36 @@ for factor in range(MINFACTOR, MAXFACTOR+1):
 #==========================
 # Plot()
 #==========================
-fig, axs = plt.subplots(2, 3, figsize=(100, 50))
-
+fig, axs = plt.subplots(1, 3, figsize=(100, 50))
+'''
 axs[0][0].imshow(imagem, cmap='gray', vmin=0, vmax=255)
 axs[0][0].set_title("Original")
 axs[0][1].imshow(compressedImage, cmap='gray', vmin=0, vmax=255)
 axs[0][1].set_title(f"Compressão Fator {factor}")
-
+'''
 #================================
 # Graph Plots()
 #================================
-# SSIM Graphs:
-axs[1][0].plot()
-axs[1][0].plot(compressFactors, ssimValues, label='SSIM', marker='o', color='orange')
-axs[1][0].set_xlabel('Quality Factor')
-axs[1][0].set_ylabel('SSIM')
-axs[1][0].set_title('SSIM vs Quality Factor')
+for idx, blockSize in enumerate(blockTypes):
+	# SSIM vs BPP
+	axs[0].plot(bppValues[idx], ssimValues[idx], label=f'Block Size {blockSize}', marker='o')
+	axs[0].set_xlabel('BPP Value')
+	axs[0].set_ylabel('SSIM')
+	axs[0].set_title('SSIM vs BPP')
+	axs[0].legend()
 
-# PSNR Graphs:
-axs[1][1].plot()
-axs[1][1].plot(compressFactors, psnrValues, label='PSNR', marker='o', color='purple')
-axs[1][1].set_xlabel('Quality Factor')
-axs[1][1].set_ylabel('PSNR')
-axs[1][1].set_title('PSNR vs Quality Factor')
-
-# BPP Graphs:
-axs[1][2].plot()
-axs[1][2].plot(compressFactors, bppValues, label='BPP', marker='o', color='green')
-axs[1][2].set_xlabel('Quality Factor')
-axs[1][2].set_ylabel('BPP')
-axs[1][2].set_title('BPP vs Quality Factor')
-
-
+	# PSNR vs BPP
+	axs[1].plot(bppValues[idx], psnrValues[idx], label=f'Block Size {blockSize}', marker='o')
+	axs[1].set_xlabel('BPP Value')
+	axs[1].set_ylabel('PSNR')
+	axs[1].set_title('PSNR vs BPP')
+	axs[1].legend()
+	'''
+	# BPP vs Quality Factor
+	axs[2].plot(compressFactors[idx], bppValues[idx], label=f'Block Size {blockSize}', marker='o')
+	axs[2].set_xlabel('Quality Factor')
+	axs[2].set_ylabel('BPP')
+	axs[2].set_title('BPP vs Quality Factor')
+	axs[2].legend()
+	'''
 plt.show()
